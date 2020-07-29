@@ -53,9 +53,13 @@ except ImportError:
 try:
     import pymysql
     v_supported_rdbms.append('MySQL')
-    v_supported_rdbms.append('MariaDB')
+    # v_supported_rdbms.append('MariaDB')
 except ImportError:
     pass
+
+from . import dbapi  # Now using MariaDB name to represent SQream
+v_supported_rdbms.append('MariaDB')
+
 try:
     import fdb
     v_supported_rdbms.append('Firebird')
@@ -2213,15 +2217,16 @@ class MySQL(Generic):
 
 '''
 ------------------------------------------------------------------------
-MariaDB
+SQream (posing as MariaDB)
 ------------------------------------------------------------------------
 '''
 class MariaDB(Generic):
+    
     def __init__(self, p_host, p_port, p_service, p_user, p_password, p_conn_string='', p_encoding=None):
         if 'MariaDB' in v_supported_rdbms:
             self.v_host = p_host
             if p_port is None or p_port == '':
-                self.v_port = 3306
+                self.v_port = 5000
             else:
                 self.v_port = p_port
             self.v_conn_string = p_conn_string
@@ -2240,60 +2245,30 @@ class MariaDB(Generic):
             self.v_timing = False
             self.v_status = 0
             self.v_con_id = 0
-            self.v_types = {
-                0: 'DECIMAL',
-                1: 'TINY',
-                2: 'SHORT',
-                3: 'LONG',
-                4: 'FLOAT',
-                5: 'DOUBLE',
-                6: 'NULL',
-                7: 'TIMESTAMP',
-                8: 'LONGLONG',
-                9: 'INT24',
-                10: 'DATE',
-                11: 'TIME',
-                12: 'DATETIME',
-                13: 'YEAR',
-                14: 'NEWDATE',
-                15: 'VARCHAR',
-                16: 'BIT',
-                245: 'JSON',
-                246: 'NEWDECIMAL',
-                247: 'ENUM',
-                248: 'SET',
-                249: 'TINY_BLOB',
-                250: 'MEDIUM_BLOB',
-                251: 'LONG_BLOB',
-                252: 'BLOB',
-                253: 'VAR_STRING',
-                254: 'STRING',
-                255: 'GEOMETRY'
-            }
             self.v_encoding = p_encoding
         else:
             raise Spartacus.Database.Exception("MariaDB is not supported. Please install it with 'pip install Spartacus[mariadb]'.")
+
     def GetConnectionString(self):
         return None
+
     def Open(self, p_autocommit=True):
+        
         try:
-            self.v_con = pymysql.connect(
-                host=self.v_host,
-                port=int(self.v_port),
-                db=self.v_service,
-                user=self.v_user,
-                password=self.v_password,
-                autocommit=p_autocommit,
-                read_default_file='~/.my.cnf')
+            self.v_con = dbapi.connect(
+                host=self.v_host, port=int(self.v_port), database=self.v_service, username=self.v_user, password=self.v_password)
+
             self.v_cur = self.v_con.cursor()
-            self.v_start = True
-            self.v_status = 0
-            self.v_con_id = self.ExecuteScalar('select connection_id()')
-        except pymysql.Error as exc:
-            raise Spartacus.Database.Exception(str(exc))
+            
+            self.v_start = True   # seems to be in everyone
+            
+            # self.v_con_id = self.ExecuteScalar('select connection_id()')  # For cancel / GetPID
         except Exception as exc:
             raise Spartacus.Database.Exception(str(exc))
+
     def Query(self, p_sql, p_alltypesstr=False, p_simple=False):
+        ''' execute() + fetchone() loop '''
+
         try:
             v_keep = None
             if self.v_con is None:
@@ -2313,14 +2288,15 @@ class MariaDB(Generic):
             return v_table
         except Spartacus.Database.Exception as exc:
             raise exc
-        except pymysql.Error as exc:
-            raise Spartacus.Database.Exception(str(exc))
         except Exception as exc:
             raise Spartacus.Database.Exception(str(exc))
         finally:
             if not v_keep:
                 self.Close()
+
     def Execute(self, p_sql):
+        ''' Just execute() '''
+
         try:
             v_keep = None
             if self.v_con is None:
@@ -2328,17 +2304,18 @@ class MariaDB(Generic):
                 v_keep = False
             else:
                 v_keep = True
-            self.v_status = self.v_cur.execute(p_sql)
+            self.v_cur.execute(p_sql)
         except Spartacus.Database.Exception as exc:
             raise exc
-        except pymysql.Error as exc:
-            raise Spartacus.Database.Exception(str(exc))
         except Exception as exc:
             raise Spartacus.Database.Exception(str(exc))
         finally:
             if not v_keep:
                 self.Close()
+
     def ExecuteScalar(self, p_sql):
+        ''' eceute() + single extracted fetchone() '''
+
         try:
             v_keep = None
             if self.v_con is None:
@@ -2346,23 +2323,27 @@ class MariaDB(Generic):
                 v_keep = False
             else:
                 v_keep = True
-            self.v_status = self.v_cur.execute(p_sql)
+            self.v_cur.execute(p_sql)
             r = self.v_cur.fetchone()
             if r != None:
-                s = r[0]
+                s = r[0]  # See if we need r[0] or just r
             else:
                 s = None
             return s
         except Spartacus.Database.Exception as exc:
             raise exc
-        except pymysql.Error as exc:
-            raise Spartacus.Database.Exception(str(exc))
         except Exception as exc:
             raise Spartacus.Database.Exception(str(exc))
         finally:
             if not v_keep:
                 self.Close()
+
+
+    def GetPID(self):
+        return None  # can return connection id here
+
     def Close(self, p_commit=True):
+
         try:
             if self.v_con:
                 self.v_con.commit()
@@ -2371,48 +2352,38 @@ class MariaDB(Generic):
                     self.v_cur = None
                 self.v_con.close()
                 self.v_con = None
-        except pymysql.Error as exc:
-            raise Spartacus.Database.Exception(str(exc))
         except Exception as exc:
             raise Spartacus.Database.Exception(str(exc))
+    
     def Commit(self):
         self.Close(True)
+    
     def Rollback(self):
         self.Close(False)
+    
     def Cancel(self, p_usesameconn=True):
+        ''' Maria db opens a new connection to issue a kill command, we should add this to the dbapi 
+            ie open a new connection to close the existing one  
+        '''
+
         try:
             if self.v_con:
-                v_con2 = pymysql.connect(
-                    host=self.v_host,
-                    port=int(self.v_port),
-                    db=self.v_service,
-                    user=self.v_user,
-                    password=self.v_password)
-                v_cur2 = v_con2.cursor()
-                self.v_status = v_cur2.execute('kill {0}'.format(self.v_con_id))
-                v_cur2.close()
-                v_con2.close()
+                self.v_con.cancel()    # Add this to db-api
                 if self.v_cur:
                     self.v_cur.close()
                     self.v_cur = None
-                self.v_con.close()
+                self.v_con.close()   # close_statement + close_connection + flag
                 self.v_con = None
-        except pymysql.Error as exc:
-            raise Spartacus.Database.Exception(str(exc))
         except Exception as exc:
             raise Spartacus.Database.Exception(str(exc))
-    def GetPID(self):
-        return self.v_con_id
+    
     def Terminate(self, p_pid):
-        try:
-            self.Execute('kill {0}'.format(p_pid))
-        except Spartacus.Database.Exception as exc:
-            raise exc
-        except pymysql.Error as exc:
-            raise Spartacus.Database.Exception(str(exc))
-        except Exception as exc:
-            raise Spartacus.Database.Exception(str(exc))
+        pass   # 'kill {pid}' command in maria
+
+    
     def GetFields(self, p_sql):
+        ''' Get table fields. Is this query appropriate? What is t? Check where this is used'''
+
         try:
             v_keep = None
             if self.v_con is None:
@@ -2421,45 +2392,39 @@ class MariaDB(Generic):
             else:
                 v_keep = True
             v_fields = []
-            self.v_status = self.v_cur.execute('select * from ( ' + p_sql + ' ) t limit 1')
+            self.v_cur.execute('select * from ( ' + p_sql + ' ) t limit 1')
             r = self.v_cur.fetchone()
             if r != None:
                 k = 0
                 for c in self.v_cur.description:
-                    v_fields.append(DataField(c[0], p_type=type(r[k]), p_dbtype=self.v_types[c[1]]))
+                    v_fields.append(DataField(c[0], p_type=type(r[k]), p_dbtype=type(r[k])))
                     k = k + 1
             else:
                 k = 0
                 for c in self.v_cur.description:
-                    v_fields.append(DataField(c[0], p_type=type(None), p_dbtype=self.v_types[c[1]]))
+                    v_fields.append(DataField(c[0], p_type=type(None), p_dbtype=type(None)))
                     k = k + 1
             return v_fields
         except Spartacus.Database.Exception as exc:
             raise exc
-        except pymysql.Error as exc:
-            raise Spartacus.Database.Exception(str(exc))
         except Exception as exc:
             raise Spartacus.Database.Exception(str(exc))
         finally:
             if not v_keep:
                 self.Close()
+
     def GetNotices(self):
         return []
+   
     def ClearNotices(self):
         pass
+    
     def GetStatus(self):
-        try:
-            if self.v_con is None:
-                raise Spartacus.Database.Exception('This method should be called in the middle of Open() and Close() calls.')
-            else:
-                return self.v_status
-        except Spartacus.Database.Exception as exc:
-            raise exc
-        except pymysql.Error as exc:
-            raise Spartacus.Database.Exception(str(exc))
-        except Exception as exc:
-            raise Spartacus.Database.Exception(str(exc))
+        return None  # Maria's .execute() returns a status
+
     def GetConStatus(self):
+        ''' Return v_con status '''
+
         try:
             if self.v_con is None:
                 return 0
@@ -2467,17 +2432,17 @@ class MariaDB(Generic):
                 return 1
         except Spartacus.Database.Exception as exc:
             raise exc
-        except pymysql.Error as exc:
-            raise Spartacus.Database.Exception(str(exc))
         except Exception as exc:
             raise Spartacus.Database.Exception(str(exc))
+
     def QueryBlock(self, p_sql, p_blocksize, p_alltypesstr=False, p_simple=False):
+        ''' execute() + fetchone() until reaching p_blocksize rows or all if p_blocksize is non positive'''
         try:
             if self.v_con is None:
                 raise Spartacus.Database.Exception('This method should be called in the middle of Open() and Close() calls.')
             else:
                 if self.v_start:
-                    self.v_status = self.v_cur.execute(p_sql)
+                    self.v_cur.execute(p_sql)
                 v_table = DataTable(None, p_alltypesstr, p_simple)
                 if self.v_cur.description:
                     for c in self.v_cur.description:
@@ -2499,11 +2464,17 @@ class MariaDB(Generic):
                 return v_table
         except Spartacus.Database.Exception as exc:
             raise exc
-        except pymysql.Error as exc:
+        except sqlite3.Error as exc:
             raise Spartacus.Database.Exception(str(exc))
         except Exception as exc:
             raise Spartacus.Database.Exception(str(exc))
+
+
     def InsertBlock(self, p_block, p_tablename, p_fields=None):
+        ''' Inline insert of values in p_block.Rows to columns in p_block.Columns 
+            See what mogrify does
+        '''
+
         try:
             v_columnames = []
             if p_fields is None:
@@ -2525,73 +2496,15 @@ class MariaDB(Generic):
             raise Spartacus.Database.Exception(str(exc))
         except Exception as exc:
             raise Spartacus.Database.Exception(str(exc))
+
+
     def Special(self, p_sql):
-        try:
-            v_keep = None
-            if self.v_con is None:
-                self.Open()
-                v_keep = False
-            else:
-                v_keep = True
-            v_command = p_sql.lstrip().split(' ')[0].rstrip('+')
-            v_title = None
-            v_table = None
-            v_status = None
-            if v_command == '\\?':
-                v_table = self.v_help
-            else:
-                v_aux = self.v_help.Select('Command', v_command)
-                if len(v_aux.Rows) > 0:
-                    if v_command == '\\x' and not self.v_expanded:
-                        v_status = 'Expanded display is on.'
-                        self.v_expanded = True
-                    elif v_command == '\\x' and self.v_expanded:
-                        v_status = 'Expanded display is off.'
-                        self.v_expanded = False
-                    elif v_command == '\\timing' and not self.v_timing:
-                        v_status = 'Timing is on.'
-                        self.v_timing = True
-                    elif v_command == '\\timing' and self.v_timing:
-                        v_status = 'Timing is off.'
-                        self.v_timing = False
-                else:
-                    if self.v_timing:
-                        v_timestart = datetime.datetime.now()
-                    v_table = self.Query(p_sql, True)
-                    v_tmp = self.GetStatus()
-                    if v_tmp == 1:
-                        v_status = '1 row '
-                    else:
-                        v_status = '{0} rows '.format(v_tmp)
-                    if v_command.lower() == 'select':
-                        v_status = v_status + 'in set'
-                    else:
-                        v_status = v_status + 'affected'
-                    if self.v_timing:
-                        v_status = v_status + '\nTime: {0}'.format(datetime.datetime.now() - v_timestart)
-            if v_title and v_table and len(v_table.Rows) > 0 and v_status:
-                return v_title + '\n' + v_table.Pretty(self.v_expanded) + '\n' + v_status
-            elif v_title and v_table and len(v_table.Rows) > 0:
-                return v_title + '\n' + v_table.Pretty(self.v_expanded)
-            elif v_title and v_status:
-                return v_title + '\n' + v_status
-            elif v_title:
-                return v_title
-            elif v_table and len(v_table.Rows) > 0 and v_status:
-                return v_table.Pretty(self.v_expanded) + '\n' + v_status
-            elif v_table and len(v_table.Rows) > 0:
-                return v_table.Pretty(self.v_expanded)
-            elif v_status:
-                return v_status
-            else:
-                return ''
-        except Spartacus.Database.Exception as exc:
-            raise exc
-        except Exception as exc:
-            raise Spartacus.Database.Exception(str(exc))
-        finally:
-            if not v_keep:
-                self.Close()
+        ''' Some kind of prettifier function, using generic variant '''
+
+        return self.Query(p_sql).Pretty()
+
+
+
 
 '''
 ------------------------------------------------------------------------
